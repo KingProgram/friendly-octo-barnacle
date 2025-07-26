@@ -1,96 +1,97 @@
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
+#include <windows.h>
+#include <ctime>
+#include <string>
 
-#define MAX_LINES 100
-#define MAX_VARS 50
+const char CLASS_NAME[] = "GuessGameWindow";
 
-// Simple variable structure
-typedef struct {
-    char name[50];
-    char value[100];
-} Var;
+// Function to convert int to string
+std::string intToStr(int num) {
+    char buf[10];
+    wsprintfA(buf, "%d", num);
+    return buf;
+}
 
-Var vars[MAX_VARS];
-int varCount = 0;
-
-char* getVar(const char* name) {
-    for (int i = 0; i < varCount; i++) {
-        if (strcmp(vars[i].name, name) == 0) {
-            return vars[i].value;
-        }
+// Simple input box using Windows API
+std::string ShowInputBox(const char* prompt, const char* title) {
+    char input[100] = "";
+    if (DialogBoxParamA(
+            GetModuleHandle(nullptr),
+            MAKEINTRESOURCE(101), 0, [](HWND hwndDlg, UINT uMsg, WPARAM wParam, LPARAM lParam) -> INT_PTR {
+                static char* buffer;
+                switch (uMsg) {
+                    case WM_INITDIALOG:
+                        buffer = (char*)lParam;
+                        return TRUE;
+                    case WM_COMMAND:
+                        if (LOWORD(wParam) == IDOK) {
+                            GetDlgItemTextA(hwndDlg, 1001, buffer, 100);
+                            EndDialog(hwndDlg, IDOK);
+                            return TRUE;
+                        }
+                        if (LOWORD(wParam) == IDCANCEL) {
+                            EndDialog(hwndDlg, IDCANCEL);
+                            return TRUE;
+                        }
+                        break;
+                }
+                return FALSE;
+            },
+            (LPARAM)input) == IDOK) {
+        return std::string(input);
     }
     return "";
 }
 
-void setVar(const char* name, const char* value) {
-    for (int i = 0; i < varCount; i++) {
-        if (strcmp(vars[i].name, name) == 0) {
-            strcpy(vars[i].value, value);
-            return;
+// Message loop and window procedure
+LRESULT CALLBACK WindowProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) {
+    switch (uMsg) {
+        case WM_CREATE: {
+            srand((UINT)time(0));
+            int number = (rand() % 10) + 1;
+
+            // Show prompt
+            std::string guessStr = ShowInputBox("Guess a number (1-10):", "Number Guess Game");
+
+            int guess = atoi(guessStr.c_str());
+            std::string result;
+            if (guess == number)
+                result = "🎉 Correct! You guessed the number!";
+            else
+                result = "❌ Wrong! The number was " + intToStr(number);
+
+            MessageBoxA(hwnd, result.c_str(), "Result", MB_OK | MB_ICONINFORMATION);
+            PostQuitMessage(0);
+            return 0;
         }
+        case WM_DESTROY:
+            PostQuitMessage(0);
+            return 0;
     }
-    strcpy(vars[varCount].name, name);
-    strcpy(vars[varCount].value, value);
-    varCount++;
+    return DefWindowProc(hwnd, uMsg, wParam, lParam);
 }
 
-void runPCP(const char* filename) {
-    FILE* file = fopen(filename, "r");
-    if (!file) {
-        printf("Error opening file.\n");
-        return;
+int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int nCmdShow) {
+    WNDCLASS wc = {};
+    wc.lpfnWndProc   = WindowProc;
+    wc.hInstance     = hInstance;
+    wc.lpszClassName = CLASS_NAME;
+    wc.hbrBackground = CreateSolidBrush(RGB(240, 240, 240)); // light gray
+
+    RegisterClass(&wc);
+
+    HWND hwnd = CreateWindowEx(
+        0, CLASS_NAME, "Random Number Game", WS_OVERLAPPEDWINDOW,
+        CW_USEDEFAULT, CW_USEDEFAULT, 400, 300,
+        nullptr, nullptr, hInstance, nullptr
+    );
+
+    ShowWindow(hwnd, nCmdShow);
+
+    MSG msg = {};
+    while (GetMessage(&msg, nullptr, 0, 0)) {
+        TranslateMessage(&msg);
+        DispatchMessage(&msg);
     }
 
-    char line[256];
-    while (fgets(line, sizeof(line), file)) {
-        // Remove newline
-        line[strcspn(line, "\n")] = 0;
-
-        // val
-        if (strncmp(line, "val ", 4) == 0) {
-            char name[50], value[100];
-            sscanf(line, "val %s = \"%[^\"]\"", name, value);
-            setVar(name, value);
-        }
-
-        // show
-        else if (strncmp(line, "show ", 5) == 0) {
-            char text[200];
-            sscanf(line, "show \"%[^\"]\"", text);
-            printf("%s\n", text);
-        }
-
-        // view
-        else if (strncmp(line, "view ", 5) == 0) {
-            char tag[50], content[100];
-            sscanf(line, "view \"%[^\"]\", \"%[^\"]\"", tag, content);
-            printf("<%s>%s</%s>\n", tag, content, tag);
-        }
-
-        // when (simple equality check)
-        else if (strncmp(line, "when ", 5) == 0) {
-            char var[50], value[100];
-            sscanf(line, "when %s == \"%[^\"]\" {", var, value);
-            char* actual = getVar(var);
-            if (strcmp(actual, value) == 0) {
-                // get next line
-                fgets(line, sizeof(line), file);
-                line[strcspn(line, "\n")] = 0;
-                if (strncmp(line, "show ", 5) == 0) {
-                    char text[200];
-                    sscanf(line, "show \"%[^\"]\"", text);
-                    printf("%s\n", text);
-                }
-                // skip }
-                fgets(line, sizeof(line), file);
-            } else {
-                // skip both next line and closing }
-                fgets(line, sizeof(line), file);
-                fgets(line, sizeof(line), file);
-            }
-        }
-    }
-
-    fclose(file);
+    return 0;
 }
